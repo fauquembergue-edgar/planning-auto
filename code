@@ -1,0 +1,149 @@
+Sub CREE()
+
+    ' Désactive l’actualisation de l’écran pour éviter les clignotements pendant le traitement
+    Application.ScreenUpdating = False
+
+    Dim date_base As Date
+
+    ' Vérifie si la cellule C1 de Feuil1 contient une date valide
+    If Not IsDate(Sheets("Feuil1").Range("C1").Value) Then
+        MsgBox "La case C1 ne contient pas une date valide."
+        Exit Sub
+    End If
+
+    ' Récupère la date de base à partir de la cellule C1
+    date_base = CDate(Sheets("Feuil1").Range("C1").Value)
+
+    Dim wb As Workbook
+    Set wb = Workbooks.Add
+
+    ' Prépare le nom du fichier à enregistrer avec le mois et l’année en majuscules
+    Dim nomFichier As String
+    nomFichier = "PLANNING " & UCase(Format(date_base, "mmmm yyyy")) & ".xlsx"
+
+    ' Demande où enregistrer le fichier
+    Application.Dialogs(xlDialogSaveAs).Show nomFichier
+    MsgBox "Création du planning en cours. Cliquez OK"
+
+    Dim i As Integer, j As Integer
+    Dim date_courante As Date
+    Dim nomJour As String
+
+    ' Boucle pour créer les feuilles correspondant aux jours du mois choisi
+    For i = 1 To 31
+        date_courante = date_base + 30 - i + 1
+
+        ' Ne traite que les jours du mois sélectionné
+        If Month(date_courante) = Month(date_base) Then
+
+            ' Copie les feuilles modèles depuis le fichier source
+            Windows("CREATION PLANNING.xlsm").Activate
+            Sheets(Array("LOUVET", "TPW", "BUREAU", "LISTE MATERIEL")).Copy Before:=wb.Sheets(1)
+
+            nomJour = UCase(Format(date_courante, "dddd"))
+            j = Day(date_courante)
+
+            ' Renomme les feuilles et inscrit la date en cellule E1
+            With wb.Sheets("LOUVET")
+                .Range("E1").Value = nomJour & " " & j & " " & UCase(Format(date_courante, "mmmm"))
+                .Name = "LOUVET " & nomJour & " " & j & " " & UCase(Format(date_courante, "mmmm"))
+            End With
+
+            With wb.Sheets("TPW")
+                .Range("E1").Value = nomJour & " " & j & " " & UCase(Format(date_courante, "mmmm"))
+                .Name = "TPW " & nomJour & " " & j & " " & UCase(Format(date_courante, "mmmm"))
+            End With
+
+            With wb.Sheets("BUREAU")
+                .Range("E1").Value = nomJour & " " & j & " " & UCase(Format(date_courante, "mmmm"))
+                .Name = "BUREAU " & nomJour & " " & j & " " & UCase(Format(date_courante, "mmmm"))
+            End With
+
+            wb.Sheets("LISTE MATERIEL").Name = "LISTE MATERIEL " & j & " " & UCase(Format(date_courante, "mmmm"))
+        End If
+    Next i
+
+    ' Pour chaque feuille créée, ajouter les colonnes L et M avec des formules de cumul
+    Dim feuille As Worksheet
+    For Each feuille In wb.Sheets
+
+        ' Ne traite que les feuilles LOUVET et TPW
+        If feuille.Name Like "LOUVET*" Or feuille.Name Like "TPW*" Then
+
+            feuille.Range("L2").Value = "HRS TOT BONS"
+            feuille.Range("M2").Value = "HRS TOT PRES."
+
+            ' Récupère les éléments de date dans le nom de la feuille
+            Dim prefix As String
+            prefix = Split(feuille.Name, " ")(0)
+            Dim jour As String: jour = Split(feuille.Name, " ")(1)
+            Dim jour_num As Integer: jour_num = Val(Split(feuille.Name, " ")(2))
+            Dim mois As String: mois = Split(feuille.Name, " ")(3)
+
+            ' Ajoute les formules ligne par ligne
+            Dim ligne As Long
+            For ligne = 3 To 70
+
+                Dim formuleL As String
+                Dim formuleM As String
+                Dim cumulJ As Integer
+
+                ' Formule de base sur la journée actuelle
+                formuleL = "=F" & ligne
+                formuleM = "=G" & ligne
+
+                ' Calcule le début de la semaine (lundi)
+                Dim jour_debut_semaine As Integer
+                jour_debut_semaine = jour_num - Weekday(DateSerial(Year(date_base), Month(date_base), jour_num), vbMonday) + 1
+                If jour_debut_semaine < 1 Then jour_debut_semaine = 1
+
+                ' Si jour = samedi, on ajuste pour cumuler les 6 jours précédents
+                If jour = "SAMEDI" Then
+                    jour_debut_semaine = jour_num - 5
+                    If jour_debut_semaine < 1 Then jour_debut_semaine = 1
+                End If
+
+                ' Ajoute les valeurs des jours précédents de la même semaine
+                For cumulJ = jour_debut_semaine To jour_num - 1
+                    formuleL = formuleL & "+IF($B" & ligne & "='" & prefix & " " & UCase(Format(DateSerial(Year(date_base), Month(date_base), cumulJ), "dddd")) & " " & cumulJ & " " & mois & "'!$B" & ligne & ", '" & prefix & " " & UCase(Format(DateSerial(Year(date_base), Month(date_base), cumulJ), "dddd")) & " " & cumulJ & " " & mois & "'!F" & ligne & ", 0)"
+                    formuleM = formuleM & "+IF($B" & ligne & "='" & prefix & " " & UCase(Format(DateSerial(Year(date_base), Month(date_base), cumulJ), "dddd")) & " " & cumulJ & " " & mois & "'!$B" & ligne & ", '" & prefix & " " & UCase(Format(DateSerial(Year(date_base), Month(date_base), cumulJ), "dddd")) & " " & cumulJ & " " & mois & "'!G" & ligne & ", 0)"
+                Next cumulJ
+
+                feuille.Cells(ligne, "L").Formula = formuleL
+                feuille.Cells(ligne, "M").Formula = formuleM
+            Next ligne
+
+            ' Applique une mise en forme conditionnelle en dégradé de couleur sur les colonnes L et M
+            With feuille.Range("L3:M70")
+                .FormatConditions.Delete
+                .FormatConditions.AddColorScale ColorScaleType:=3
+                With .FormatConditions(.FormatConditions.Count)
+                    .SetFirstPriority
+                    With .ColorScaleCriteria(1)
+                        .Type = xlConditionValueNumber
+                        .Value = 0
+                        .FormatColor.Color = 5287936
+                    End With
+                    With .ColorScaleCriteria(2)
+                        .Type = xlConditionValueNumber
+                        .Value = 17
+                        .FormatColor.Color = 8711167
+                    End With
+                    With .ColorScaleCriteria(3)
+                        .Type = xlConditionValueNumber
+                        .Value = 40
+                        .FormatColor.Color = 255
+                    End With
+                End With
+            End With
+
+        End If
+    Next feuille
+
+    ' Message final de confirmation
+    MsgBox "Le planning a bien été généré avec les colonnes cumulées L et M dans LOUVET et TPW."
+
+    ' Réactive l’actualisation de l’écran
+    Application.ScreenUpdating = True
+
+End Sub
